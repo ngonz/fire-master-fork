@@ -133,8 +133,8 @@ async def sepp_calculator(
             balance=balance, age=age, rate=rate,
             target_monthly=target_monthly, afr_120_mid_term=afr_120,
         )
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid SEPP calculation parameters.")
 
 
 @router.get("/monte-carlo", response_model=MonteCarloResponse)
