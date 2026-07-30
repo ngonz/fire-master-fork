@@ -35,7 +35,7 @@ services:
     # No host port: internal network only.
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-firemaster}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-firemaster}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-CHANGEME-run-app-setup}
       POSTGRES_DB: ${POSTGRES_DB:-firemaster}
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -48,9 +48,12 @@ services:
 
   redis:
     image: redis:7-alpine
-    # No host port: internal network only.
+    # No host port: internal network only. Still password-protected — this compose file is meant
+    # to be run internet-facing behind Caddy, so nothing inside it should rely on network
+    # position alone for its security.
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-CHANGEME-run-app-setup}"]
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-CHANGEME-run-app-setup}", "--no-auth-warning", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -63,9 +66,9 @@ services:
     volumes:
       - ./backend/.env:/app/backend/.env   # runtime secrets; mounted file, NOT env_file (see docker-compose.public.yml header)
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-firemaster}:${POSTGRES_PASSWORD:-firemaster}@postgres:5432/${POSTGRES_DB:-firemaster}
-      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-firemaster}:${POSTGRES_PASSWORD:-firemaster}@postgres:5432/${POSTGRES_DB:-firemaster}
-      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-firemaster}:${POSTGRES_PASSWORD:-CHANGEME-run-app-setup}@postgres:5432/${POSTGRES_DB:-firemaster}
+      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-firemaster}:${POSTGRES_PASSWORD:-CHANGEME-run-app-setup}@postgres:5432/${POSTGRES_DB:-firemaster}
+      REDIS_URL: "redis://:${REDIS_PASSWORD:-CHANGEME-run-app-setup}@redis:6379/0"
       DEMO_MODE: "true"
       SEED_DEMO: "true"
     depends_on:
@@ -81,9 +84,9 @@ services:
     volumes:
       - ./backend/.env:/app/backend/.env   # runtime secrets; mounted file, NOT env_file
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-firemaster}:${POSTGRES_PASSWORD:-firemaster}@postgres:5432/${POSTGRES_DB:-firemaster}
-      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-firemaster}:${POSTGRES_PASSWORD:-firemaster}@postgres:5432/${POSTGRES_DB:-firemaster}
-      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-firemaster}:${POSTGRES_PASSWORD:-CHANGEME-run-app-setup}@postgres:5432/${POSTGRES_DB:-firemaster}
+      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-firemaster}:${POSTGRES_PASSWORD:-CHANGEME-run-app-setup}@postgres:5432/${POSTGRES_DB:-firemaster}
+      REDIS_URL: "redis://:${REDIS_PASSWORD:-CHANGEME-run-app-setup}@redis:6379/0"
       DEMO_MODE: "true"
     depends_on:
       postgres:

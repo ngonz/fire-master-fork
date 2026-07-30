@@ -61,16 +61,23 @@ itself — one reboot, then the commands below.)
 gh auth login                                         # GitHub.com → HTTPS → browser (paste the code shown in terminal)
 gh repo clone gdb-mtx/fire-master firemaster && cd firemaster
 
-docker compose run --rm backend uv run python -m app.setup   # one-time: JWT secret + your admin password
-docker compose up                                     # pulls prebuilt images + starts everything; migrations + demo data load automatically
+docker compose run --rm backend uv run python -m app.setup   # one-time: JWT secret, admin password, random DB/Redis passwords
+docker compose up --build                             # builds + starts everything; migrations + demo data load automatically
 ```
 
 Open **http://localhost:5173** and log in as `admin` with the password you chose — the **demo
 persona is already loaded**, so every page (Dashboard, Retirement, Runway, Config) is alive on
 first launch.
 
-> **First run pulls prebuilt multi-arch images from GHCR (~30–60s)**; subsequent `docker compose up` is faster still.
-> (No prebuilt image yet, or offline? `docker compose up --build` builds locally instead.) To update later: `docker compose pull && docker compose up -d`.
+> **Everything binds to `127.0.0.1` by default** — the database, cache, API and UI are reachable
+> from this machine only. This is deliberate: the app holds your full Monarch transaction history,
+> and Postgres/Redis sit *behind* the login screen, so exposing them would hand out the data
+> without ever touching the JWT. To share on your LAN, set `BIND_HOST=0.0.0.0` in the root `.env`
+> — but put real authentication in front of it first.
+>
+> **`--build` builds from this checkout**, so you run the code you can actually read. To pull
+> prebuilt images instead, set `FIREMASTER_BACKEND_IMAGE` / `FIREMASTER_FRONTEND_IMAGE` in the
+> root `.env`. Be aware a `:latest` tag is mutable and will not contain any local changes.
 > A `migrate` container that shows `Exited (0)` is normal — it applied migrations + seeded the demo, then quit.
 > If `:5432`/`:6379`/`:8000`/`:5173` are already taken, set e.g.
 > `BACKEND_HOST_PORT=8001 FRONTEND_HOST_PORT=5174` before the command. Operational details,
@@ -133,13 +140,25 @@ on the native path).
 ## Troubleshooting
 
 - **`Docker daemon is not running`** — start Docker Desktop first and wait for it to finish launching.
-- **Port already in use** — the stack publishes 5432, 6379, 8000, 5173. Remap any of them with the
-  `POSTGRES_HOST_PORT` / `REDIS_HOST_PORT` / `BACKEND_HOST_PORT` / `FRONTEND_HOST_PORT` env vars,
-  e.g. `BACKEND_HOST_PORT=8001 docker compose up`.
+- **Port already in use** — the stack publishes 5432, 6379, 8000, 5173 on `127.0.0.1`. Remap any of
+  them with the `POSTGRES_HOST_PORT` / `REDIS_HOST_PORT` / `BACKEND_HOST_PORT` / `FRONTEND_HOST_PORT`
+  env vars, e.g. `BACKEND_HOST_PORT=8001 docker compose up`. The bind interface is separate
+  (`BIND_HOST`) so remapping a port can't accidentally drop the loopback restriction.
+- **Can't reach the app from another device** — that's the default. Set `BIND_HOST=0.0.0.0` in the
+  root `.env` and restart. Everything on that network can then reach Postgres and Redis directly,
+  which bypasses the login entirely, so only do this on a network you trust.
+- **`password authentication failed for user "firemaster"`** — Postgres only applies
+  `POSTGRES_PASSWORD` when it initialises an *empty* data directory. If you changed the password
+  after the first run, the volume still has the old one. Either `docker compose down -v` (this
+  destroys the database) or change it in place: `docker compose exec postgres psql -U firemaster -c
+  "ALTER USER firemaster PASSWORD '...';"`.
 - **`migrate` container shows `Exited (0)`** — that's normal; it ran migrations and quit. See
   [docs/CONTAINER_RUNBOOK.md](docs/CONTAINER_RUNBOOK.md) for the full container troubleshooting table.
 - **Login fails with a startup error about `JWT_SECRET_KEY`/`AUTH_PASSWORD_HASH`** — you skipped
   first-run setup: `docker compose run --rm backend uv run python -m app.setup`.
+- **Services start but can't reach Postgres/Redis, and the password looks like `CHANGEME-run-app-setup`**
+  — you skipped first-run setup. That placeholder is the deliberate fallback so an unconfigured
+  stack fails loudly instead of running on a guessable password.
 - **Changed `backend/.env` but nothing happened** — settings are cached at process start;
   `docker compose restart backend celery-worker` (or restart the host processes on the native path).
 - **Edited engine code but Celery behaves old** — the worker doesn't hot-reload;
