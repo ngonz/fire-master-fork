@@ -1,6 +1,9 @@
 """Advisor API routes — streaming chat with Claude + conversation management."""
 
+import json
+import logging
 import uuid
+from collections.abc import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -20,6 +23,28 @@ from app.schemas.advisor import (
 )
 
 router = APIRouter(prefix="/api/advisor", tags=["advisor"])
+logger = logging.getLogger(__name__)
+
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+async def _safe_chat_stream(
+    manager: AdvisorManager,
+    request: ChatRequest,
+) -> AsyncGenerator[str, None]:
+    """Stream advisor events while preventing exception detail leakage."""
+    try:
+        async for event in manager.chat(
+            user_message=request.message,
+            conversation_id=request.conversation_id,
+            page_context=request.page_context,
+        ):
+            yield event
+    except Exception:
+        logger.exception("Advisor stream failed")
+        yield _sse("error", {"error": "Internal server error"})
 
 
 @router.post("/chat")
@@ -41,11 +66,7 @@ async def chat(
     manager = AdvisorManager(db=db, api_key=settings.ANTHROPIC_API_KEY, model=model)
 
     return StreamingResponse(
-        manager.chat(
-            user_message=request.message,
-            conversation_id=request.conversation_id,
-            page_context=request.page_context,
-        ),
+        _safe_chat_stream(manager, request),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

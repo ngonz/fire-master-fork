@@ -145,7 +145,7 @@ class AdvisorManager:
 
         except Exception:
             logger.exception("Advisor chat error")
-            yield self._sse("error", {"error": "An error occurred processing your request."})
+            yield self._sse("error", {"error": "Internal server error"})
             return
         finally:
             # Always save conversation state + token counts
