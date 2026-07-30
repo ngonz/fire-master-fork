@@ -11,7 +11,7 @@
 
 | | **Native (contributor) path** | **Docker (user) path** |
 |---|---|---|
-| Command | `./scripts/start.sh` | `docker compose up` |
+| Command | `./scripts/start.sh` | `docker compose up --build` |
 | Backend runs | on your Mac (host) via `uv` | inside a container |
 | Frontend runs | on your Mac via `npm` | inside a container |
 | Postgres/Redis | Docker containers | same Docker containers |
@@ -64,7 +64,7 @@ Your `backend/.env` (with `@localhost`) and your data are exactly as they were.
 ### 4. Nuke all containers and start clean — WITHOUT losing data
 ```bash
 docker compose down          # stops + removes containers, KEEPS volumes (your data)
-docker compose up            # rebuilds the world; data still there
+docker compose up --build     # rebuilds the world; data still there
 ```
 
 ---
@@ -130,7 +130,7 @@ docker compose up            # rebuilds the world; data still there
 ### Change 5 — Retire `start.sh` as the user path (`scripts/`, `README`)
 - `scripts/start.sh` and `scripts/setup.sh` are **kept**, but their header comments now mark them
   as the *optional native/contributor* path. Nothing was deleted — the native workflow is intact.
-- README Quick start now leads with `docker compose up`; the native path is a clearly-labeled
+- README Quick start now leads with `docker compose up --build`; the native path is a clearly-labeled
   "Contributor / native dev (optional)" subsection.
 
 ### Supporting — `.dockerignore`, `.gitattributes`
@@ -146,10 +146,10 @@ docker compose up            # rebuilds the world; data still there
 
 - ~~**Multi-arch prebuilt images:**~~ **Done** (Jun 2026) — Phase 1 of `strategy/TIERS_PLAN.md`
   (private repo). `.github/workflows/docker-images.yml` builds amd64 + arm64 backend/frontend
-  images and pushes them to GHCR on push-to-main (path-filtered) + manual dispatch. Both
-  `docker-compose.yml` services now carry an `image:` alongside `build:`, so `docker compose up`
-  **pulls** (`docker compose pull` to refresh) and `up --build` / offline falls back to a local
-  build. See "Prebuilt images" below for the image-build restructure and the standalone compose.
+  images and pushes them to GHCR on push-to-main (path-filtered) + manual dispatch. **This fork
+  defaults to locally built images instead of pulling**, so the code you run is the code in your
+  checkout; set `FIREMASTER_BACKEND_IMAGE` / `FIREMASTER_FRONTEND_IMAGE` to pull published ones.
+  See "Prebuilt images" below for the image-build restructure and the standalone compose.
 - ~~**Windows + amd64 acceptance test:**~~ **Done** (Jun 2026). Validated on Azure
   `Standard_D4s_v7` / Windows Server 2025: Docker Desktop + WSL2 nested virt, amd64 images,
   demo auto-seed, scenarios — all passing. No bash/uv/node on the host.
@@ -162,8 +162,10 @@ docker compose up            # rebuilds the world; data still there
 > decouple *shipping the product* from *shipping the code* — users pull images, they don't clone.
 
 ### The workflow — `.github/workflows/docker-images.yml`
-- Two parallel jobs (backend, frontend) → `ghcr.io/gdb-mtx/firemaster-backend` and
-  `…/firemaster-frontend`, each multi-arch (`linux/amd64` + `linux/arm64`).
+- Two parallel jobs (backend, frontend) → `ghcr.io/<repository-owner>/firemaster-backend` and
+  `…/firemaster-frontend`, each multi-arch (`linux/amd64` + `linux/arm64`). The namespace is
+  derived from `github.repository_owner` (lowercased) rather than hardcoded, so a fork publishes
+  to its own account instead of failing against one it cannot write to.
 - Tags: `latest` (default branch only), `sha-<7char>`, `YYYY.MM.DD`.
 - Trigger: push to `main` (path-filtered to `backend/`, `frontend/`, `scripts/`, `config/`,
   the compose file, the workflow) + manual `workflow_dispatch`. Auth is the built-in
@@ -207,12 +209,15 @@ data volumes. A `fmtest` project gets its own network and its own EMPTY volumes
 
 The published host ports are parameterized in `docker-compose.yml`
 (`${POSTGRES_HOST_PORT:-5432}`, `${REDIS_HOST_PORT:-6379}`, `${BACKEND_HOST_PORT:-8000}`,
-`${FRONTEND_HOST_PORT:-5173}`), so an isolated stack just sets them inline:
+`${FRONTEND_HOST_PORT:-5173}`), so an isolated stack just sets them inline. The *interface*
+each port binds to is a separate variable, `${BIND_HOST:-127.0.0.1}` — every published port is
+loopback-only by default, so nothing on your network can reach the test stack's database or
+cache. Set `BIND_HOST=0.0.0.0` only when you deliberately want LAN access.
 
 ```bash
 # bring up an isolated copy on non-conflicting ports
 POSTGRES_HOST_PORT=5599 REDIS_HOST_PORT=6399 BACKEND_HOST_PORT=8020 FRONTEND_HOST_PORT=5190 \
-  docker compose -p fmtest up
+  docker compose -p fmtest up --build
 
 # tear it down INCLUDING its throwaway data (safe: only touches fmtest_* volumes)
 docker compose -p fmtest down -v
@@ -235,6 +240,9 @@ taken — no file edits, just set the var.)
 | Backend crashes: `JWT_SECRET_KEY must be set…` | No valid `.env` yet | run the setup command (Change 4): `docker compose run --rm backend uv run python -m app.setup` |
 | Login always fails with the *correct* password | **The env_file `$`-interpolation bug** (found during build): Compose interpolates `env_file` values, stripping `$…` sequences out of the bcrypt hash | the app services intentionally have **no** `env_file` — secrets load from the *mounted* `backend/.env` via pydantic. Do **not** re-add `env_file:` to backend/celery/migrate |
 | `ModuleNotFoundError` running `docker compose … backend python …` | Bare `python` uses the system interpreter, not the uv venv | prefix with `uv run`: `… backend uv run python …` |
+| Another machine on the LAN can't reach `:5173` / `:8000` | **By design** — every published port binds `${BIND_HOST:-127.0.0.1}`, so the stack is loopback-only out of the box | set `BIND_HOST=0.0.0.0` in the repo-root `.env`, and only behind a firewall or trusted network |
+| Postgres or Redis rejects the password, or a service logs `CHANGEME-run-app-setup` | Setup never ran, so the compose placeholder defaults are still in effect | run `docker compose run --rm backend uv run python -m app.setup` — it generates random credentials and writes both `.env` files |
+| Password errors persist *after* running setup | `POSTGRES_PASSWORD` only takes effect when the `pgdata` volume is first initialized; an existing volume keeps its original password | either restore the original password, or wipe the volume with `docker compose down -v` (**destroys all data**) |
 | Old Python package after changing deps | The anonymous `.venv` volume persists across rebuilds and can hold stale deps | rebuild, then `docker compose up --build --renew-anon-volumes` (renews the anon `.venv` only; the named data volume is kept) |
 | Port already in use on `up` | Your native stack or sister project is running | remap with `BACKEND_HOST_PORT=…` etc., or stop the native app layer |
 | Demo data vanished after connecting Monarch | **Expected** — the first real sync auto-clears the demo persona (marker-scoped: only demo rows, real data untouched) | keep it with `AUTO_CLEAR_DEMO=false`; the FIRE config stays for you to rebuild on /config |

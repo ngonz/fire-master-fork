@@ -62,7 +62,7 @@ services:
   # One-shot: migrate, then seed the demo persona into the empty DB, then exit.
   # After each reset's `down -v` the DB volume is fresh, so this reseeds every time.
   migrate:
-    image: ghcr.io/gdb-mtx/firemaster-backend:latest
+    image: ${FIREMASTER_BACKEND_IMAGE:-ghcr.io/gdb-mtx/firemaster-backend:latest}
     volumes:
       - ./backend/.env:/app/backend/.env   # runtime secrets; mounted file, NOT env_file (see docker-compose.public.yml header)
     environment:
@@ -79,7 +79,7 @@ services:
     command: ["sh", "-c", "uv run alembic upgrade head && (uv run python ../scripts/seed_demo.py --if-empty || true) && (uv run python ../scripts/seed_demo_scenarios.py || true)"]
 
   backend:
-    image: ghcr.io/gdb-mtx/firemaster-backend:latest
+    image: ${FIREMASTER_BACKEND_IMAGE:-ghcr.io/gdb-mtx/firemaster-backend:latest}
     # No host port: only Caddy reaches backend:8000.
     volumes:
       - ./backend/.env:/app/backend/.env   # runtime secrets; mounted file, NOT env_file

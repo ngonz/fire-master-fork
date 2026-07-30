@@ -65,7 +65,7 @@ services:
   # repo root — see backend/Dockerfile), so `../scripts/seed_demo.py` resolves with no mount.
   # Seeing "migrate Exited (0)" in `docker compose ps` is NORMAL.
   migrate:
-    image: ghcr.io/gdb-mtx/firemaster-backend:latest
+    image: ${FIREMASTER_BACKEND_IMAGE:-ghcr.io/gdb-mtx/firemaster-backend:latest}
     volumes:
       - ./backend/.env:/app/backend/.env   # runtime secrets (see header); NOT env_file
     environment:
@@ -81,7 +81,7 @@ services:
     command: ["sh", "-c", "uv run alembic upgrade head && (uv run python ../scripts/seed_demo.py --if-empty || true)"]
 
   backend:
-    image: ghcr.io/gdb-mtx/firemaster-backend:latest
+    image: ${FIREMASTER_BACKEND_IMAGE:-ghcr.io/gdb-mtx/firemaster-backend:latest}
     ports:
       - "${BIND_HOST:-127.0.0.1}:${BACKEND_HOST_PORT:-8000}:8000"
     volumes:
@@ -105,7 +105,7 @@ services:
     command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 
   celery-worker:
-    image: ghcr.io/gdb-mtx/firemaster-backend:latest
+    image: ${FIREMASTER_BACKEND_IMAGE:-ghcr.io/gdb-mtx/firemaster-backend:latest}
     volumes:
       - ./backend/.env:/app/backend/.env   # runtime secrets (see header); NOT env_file
       - monarch_session:/data              # shared Monarch session (the worker runs the sync task)
@@ -126,7 +126,7 @@ services:
     command: uv run celery -A app.tasks.celery_app worker --loglevel=info -I app.tasks.sync_tasks
 
   celery-beat:
-    image: ghcr.io/gdb-mtx/firemaster-backend:latest
+    image: ${FIREMASTER_BACKEND_IMAGE:-ghcr.io/gdb-mtx/firemaster-backend:latest}
     volumes:
       - ./backend/.env:/app/backend/.env   # runtime secrets (see header); NOT env_file
       - monarch_session:/data              # shared Monarch session (beat schedules the sync task)
@@ -146,7 +146,7 @@ services:
     command: uv run celery -A app.tasks.celery_app beat --loglevel=info
 
   frontend:
-    image: ghcr.io/gdb-mtx/firemaster-frontend:latest
+    image: ${FIREMASTER_FRONTEND_IMAGE:-ghcr.io/gdb-mtx/firemaster-frontend:latest}
     ports:
       - "${BIND_HOST:-127.0.0.1}:${FRONTEND_HOST_PORT:-5173}:5173"
     environment:

@@ -41,7 +41,7 @@ the containers. (`git` ships with macOS; on Windows it's installed separately �
 gh auth login            # choose: GitHub.com → HTTPS → Login with a web browser
                          # ↑ It prints a one-time code IN THE TERMINAL — paste that code
                          #   into the browser prompt (it is NOT in any GitHub app).
-gh repo clone gdb-mtx/fire-master firemaster && cd firemaster
+gh repo clone ngonz/fire-master-fork firemaster && cd firemaster
 docker compose run --rm backend uv run python -m app.setup
 ```
 

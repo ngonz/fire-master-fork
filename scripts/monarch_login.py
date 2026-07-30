@@ -49,12 +49,16 @@ async def main():
     # screen-shares, recordings, and scrollback.
     password = getpass.getpass("Password: ")
 
+    # The MFA call is nested inside the outer try, not placed beside it as a sibling handler.
+    # An exception raised *inside* an except block is not caught by the following except
+    # clauses, so a wrong or expired MFA code used to escape as a raw traceback.
     try:
-        await mm.login(email, password)
-    except RequireMFAException:
-        print("\nMFA required. Check your authenticator app or email.")
-        mfa_code = input("MFA code: ")
-        await mm.multi_factor_authenticate(email, password, mfa_code)
+        try:
+            await mm.login(email, password)
+        except RequireMFAException:
+            print("\nMFA required. Check your authenticator app or email.")
+            mfa_code = input("MFA code: ")
+            await mm.multi_factor_authenticate(email, password, mfa_code)
     except Exception as e:
         print(f"Login failed: {e}", file=sys.stderr)
         sys.exit(1)
@@ -64,8 +68,13 @@ async def main():
     _verify_session_perms(session_file)
     print(f"\nSession saved to {session_file} (permissions 0600, owner-only)")
 
-    # Verify by fetching accounts
-    accounts = await mm.get_accounts()
+    # Verify by fetching accounts. The session is already saved and usable at this point, so a
+    # failure here is a warning rather than a fatal error.
+    try:
+        accounts = await mm.get_accounts()
+    except Exception as e:
+        print(f"Warning: session saved, but the verification call failed: {e}", file=sys.stderr)
+        return
     count = len(accounts.get("accounts", []))
     print(f"Verified: found {count} accounts")
 
