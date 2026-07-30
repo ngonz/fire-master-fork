@@ -113,9 +113,11 @@ def main() -> None:
     jwt_secret = secrets.token_hex(32)
     pwhash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
-    ENV_PATH.write_text(
-        ENV_TEMPLATE.format(jwt=jwt_secret, username=username, pwhash=pwhash)
-    )
+    content = ENV_TEMPLATE.format(jwt=jwt_secret, username=username, pwhash=pwhash)
+    # Write with restrictive permissions (owner-only) to protect secrets at rest.
+    fd = os.open(ENV_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(content)
 
     print("\n=== Setup complete ===")
     print(f"  File:     {ENV_PATH}")
