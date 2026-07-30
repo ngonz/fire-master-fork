@@ -193,9 +193,9 @@ class AdvisorManager:
         try:
             result = await executor(self.db, tool_input)
             return result
-        except Exception as e:
+        except Exception:
             logger.exception("Tool execution error: %s", tool_name)
-            return {"error": f"Tool '{tool_name}' failed: {str(e)}"}
+            return {"error": f"Tool '{tool_name}' failed."}
 
     @staticmethod
     def _sse(event: str, data: dict) -> str:
