@@ -40,9 +40,9 @@ async def _safe_chat_stream(
             yield event
     except Exception:
         logger.exception("Advisor stream failed")
-        yield (
-            f'event: error\ndata: {json.dumps({"error": "Internal server error"})}\n\n'
-        )
+        yield 'event: error\ndata: ' + json.dumps(
+            {"error": "Internal server error"}
+        ) + "\n\n"
 
 
 @router.post("/chat")

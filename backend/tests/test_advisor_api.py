@@ -23,9 +23,8 @@ class _SuccessfulManager:
 
 class _FailingManager:
     async def chat(self, **kwargs):
-        if False:  # pragma: no cover
-            yield ""
         raise RuntimeError(SENSITIVE_ERROR_MESSAGE)
+        yield ""  # pragma: no cover
 
 
 @pytest.mark.asyncio
