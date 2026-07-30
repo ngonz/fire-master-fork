@@ -143,9 +143,9 @@ class AdvisorManager:
                 # Rebuild API messages for next round
                 api_messages = self._build_api_messages(conversation.messages)
 
-        except Exception as e:
+        except Exception:
             logger.exception("Advisor chat error")
-            yield self._sse("error", {"error": str(e)})
+            yield self._sse("error", {"error": "An error occurred processing your request."})
             return
         finally:
             # Always save conversation state + token counts
@@ -193,9 +193,9 @@ class AdvisorManager:
         try:
             result = await executor(self.db, tool_input)
             return result
-        except Exception as e:
+        except Exception:
             logger.exception("Tool execution error: %s", tool_name)
-            return {"error": f"Tool '{tool_name}' failed: {str(e)}"}
+            return {"error": f"Tool '{tool_name}' failed."}
 
     @staticmethod
     def _sse(event: str, data: dict) -> str:
