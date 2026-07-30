@@ -114,7 +114,8 @@ def main() -> None:
     pwhash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
     ENV_PATH.write_text(
-        ENV_TEMPLATE.format(jwt=jwt_secret, username=username, pwhash=pwhash)
+        ENV_TEMPLATE.format(jwt=jwt_secret, username=username, pwhash=pwhash),
+        encoding="utf-8",
     )
 
     print("\n=== Setup complete ===")
