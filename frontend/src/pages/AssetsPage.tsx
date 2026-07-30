@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { useAssetHub } from "../api/queries";
 import Layout from "../components/Layout";
 import { formatCurrency, fmtCompact as formatCompact } from "../utils/formatting";

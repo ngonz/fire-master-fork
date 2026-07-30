@@ -1,4 +1,4 @@
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router";
 import Layout from "../components/Layout";
 import FireConfigPage from "./FireConfigPage";
 

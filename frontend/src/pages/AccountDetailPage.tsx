@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link } from "react-router";
 import { useAccountDetail, useUpdateAccountEnrichment } from "../api/queries";
 import LightweightChart from "../charts/LightweightChart";
 import Layout from "../components/Layout";
