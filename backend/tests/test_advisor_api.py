@@ -22,9 +22,8 @@ class _SuccessfulManager:
 
 
 class _FailingManager:
-    async def chat(self, **kwargs):
-        raise RuntimeError(SENSITIVE_ERROR_MESSAGE)
-        yield ""  # pragma: no cover
+    def chat(self, **kwargs):
+        return _FailingStream()
 
 
 @pytest.mark.asyncio

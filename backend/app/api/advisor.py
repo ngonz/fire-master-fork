@@ -26,6 +26,10 @@ router = APIRouter(prefix="/api/advisor", tags=["advisor"])
 logger = logging.getLogger(__name__)
 
 
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
 async def _safe_chat_stream(
     manager: AdvisorManager,
     request: ChatRequest,
@@ -40,9 +44,7 @@ async def _safe_chat_stream(
             yield event
     except Exception:
         logger.exception("Advisor stream failed")
-        yield 'event: error\ndata: ' + json.dumps(
-            {"error": "Internal server error"}
-        ) + "\n\n"
+        yield _sse("error", {"error": "Internal server error"})
 
 
 @router.post("/chat")
