@@ -8,6 +8,8 @@ from app.advisor.manager import AdvisorManager
 from app.api.advisor import _safe_chat_stream
 from app.schemas.advisor import ChatRequest
 
+SENSITIVE_ERROR_MESSAGE = "traceback: sensitive details"
+
 
 class _SuccessfulManager:
     def __init__(self):
@@ -21,8 +23,9 @@ class _SuccessfulManager:
 
 class _FailingManager:
     async def chat(self, **kwargs):
-        raise RuntimeError("traceback: sensitive details")
-        yield  # pragma: no cover
+        if False:  # pragma: no cover
+            yield ""
+        raise RuntimeError(SENSITIVE_ERROR_MESSAGE)
 
 
 @pytest.mark.asyncio
@@ -72,7 +75,7 @@ class _FailingStream:
         return self
 
     async def __anext__(self):
-        raise RuntimeError("traceback: sensitive details")
+        raise RuntimeError(SENSITIVE_ERROR_MESSAGE)
 
 
 @pytest.mark.asyncio
