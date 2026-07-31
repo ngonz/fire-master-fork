@@ -1,73 +1,28 @@
 #!/bin/bash
 # OPTIONAL native/contributor setup — NOT the documented user path.
-# The cross-platform equivalent (no bash/openssl/sed, works on Windows) is:
+# The cross-platform equivalent (no bash/uv needed, works on Windows) is:
 #   docker compose run --rm --no-deps setup
-# This bash version generates backend/.env for the native ./scripts/start.sh path.
+#
+# This is a thin wrapper around `python -m app.setup`, the single source of truth.
+# It used to `cp .env.example backend/.env` and sed in only JWT_SECRET_KEY and
+# AUTH_PASSWORD_HASH, which left the example file's literal `firemaster:firemaster`
+# in DATABASE_URL and the `change-me-must-match-REDIS_PASSWORD` placeholder in
+# REDIS_URL — while the very next documented step (`docker compose up -d postgres
+# redis`) initialised those services with completely different credentials, so the
+# native path could never actually connect. Delegating means there is exactly one
+# credential generator and the two paths cannot drift again.
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-ENV_FILE="$PROJECT_ROOT/backend/.env"
-ENV_EXAMPLE="$PROJECT_ROOT/.env.example"
 
-echo "=== FIREMaster Setup ==="
-echo ""
-
-if [ ! -f "$ENV_EXAMPLE" ]; then
-    echo "ERROR: .env.example not found at $ENV_EXAMPLE"
+if ! command -v uv >/dev/null 2>&1; then
+    echo "ERROR: uv is required for the native path. Install it from https://docs.astral.sh/uv/"
+    echo "       Or use the Docker path instead: docker compose run --rm --no-deps setup"
     exit 1
 fi
 
-if [ -f "$ENV_FILE" ]; then
-    echo "WARNING: $ENV_FILE already exists."
-    read -p "Overwrite? (y/N) " -n 1 -r
-    echo ""
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "Aborted. Existing .env unchanged."
-        exit 0
-    fi
-fi
-
-echo "Generating JWT secret key..."
-JWT_KEY=$(openssl rand -hex 32)
-
-echo ""
-read -s -p "Choose an admin password: " PASSWORD
-echo ""
-read -s -p "Confirm password: " PASSWORD2
-echo ""
-
-if [ "$PASSWORD" != "$PASSWORD2" ]; then
-    echo "ERROR: Passwords don't match."
-    exit 1
-fi
-
-if [ -z "$PASSWORD" ]; then
-    echo "ERROR: Password cannot be empty."
-    exit 1
-fi
-
-echo "Generating bcrypt hash..."
-HASH=$(cd "$PROJECT_ROOT/backend" && uv run python -c "from app.core.auth import hash_password; print(hash_password('$PASSWORD'))")
-
-cp "$ENV_EXAMPLE" "$ENV_FILE"
-
-case "$(uname)" in
-    Darwin) SED_FLAG=(-i '') ;;
-    *)      SED_FLAG=(-i) ;;
-esac
-
-sed "${SED_FLAG[@]}" "s|^JWT_SECRET_KEY=.*|JWT_SECRET_KEY=$JWT_KEY|" "$ENV_FILE"
-sed "${SED_FLAG[@]}" "s|^AUTH_PASSWORD_HASH=.*|AUTH_PASSWORD_HASH=$HASH|" "$ENV_FILE"
-
-echo ""
-echo "=== Setup complete ==="
-echo "  File:       $ENV_FILE"
-echo "  Username:   admin"
-echo "  JWT key:    (generated, 64 hex chars)"
-echo "  Password:   (hashed with bcrypt)"
-echo ""
-echo "Next steps:"
-echo "  1. docker compose up -d postgres redis"
-echo "  2. cd backend && uv run alembic upgrade head"
-echo "  3. ./scripts/start.sh"
+# app.setup writes backend/.env (application config) AND the repo-root .env that
+# docker compose interpolates for postgres/redis, keeping both in sync.
+cd "$PROJECT_ROOT/backend"
+exec uv run python -m app.setup "$@"
