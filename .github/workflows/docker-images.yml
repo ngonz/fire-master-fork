@@ -1,16 +1,19 @@
 name: Build & Push Docker Images
 
 # Builds multi-arch (linux/amd64 + linux/arm64) images for the backend and frontend
-# and pushes them to GHCR, so users `docker compose pull` (~30-60s) instead of building
-# locally (~3-5 min) and never hit architecture surprises. This is Phase 1 of the
-# distribution-tiers plan (strategy/TIERS_PLAN.md) and the technical foundation for the
-# free tier — public images need no GitHub account to pull.
+# and pushes them to GHCR under the *owning* account, so forks publish to their own
+# namespace instead of failing against someone else's. The registry is derived from
+# github.repository_owner rather than hardcoded for exactly that reason.
+#
+# Note that `docker compose up` does NOT pull these by default: the compose files default
+# to locally built tags so you run the code in your own checkout. To use these images
+# instead, set FIREMASTER_BACKEND_IMAGE / FIREMASTER_FRONTEND_IMAGE in the repo-root .env.
 #
 # Post-merge one-time steps (the workflow CANNOT do these — they're account settings):
-#   1. Watch the first run at github.com/gdb-mtx/fire-master/actions
+#   1. Watch the first run under the Actions tab of your own fork
 #   2. Make BOTH GHCR packages public: GitHub profile -> Packages -> each package ->
 #      Settings -> Change visibility -> Public (enables unauthenticated pulls)
-#   3. Test a fresh checkout + `docker compose up` — verify it PULLS, not builds.
+#   3. Test a fresh checkout with the image override vars set — verify it PULLS, not builds.
 
 on:
   push:
@@ -45,15 +48,23 @@ jobs:
           - name: backend
             context: .
             dockerfile: backend/Dockerfile
-            image: ghcr.io/gdb-mtx/firemaster-backend
+            image_name: firemaster-backend
           - name: frontend
             context: ./frontend
             dockerfile: ./frontend/Dockerfile
-            image: ghcr.io/gdb-mtx/firemaster-frontend
+            image_name: firemaster-frontend
     name: build-${{ matrix.name }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      - name: Resolve image reference
+        id: image
+        # GHCR rejects uppercase path segments, and GitHub logins may contain capitals, so
+        # the owner is lowercased here rather than interpolated straight into the tag.
+        run: |
+          owner=$(printf '%s' "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "ref=ghcr.io/${owner}/${{ matrix.image_name }}" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -72,7 +83,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ matrix.image }}
+          images: ${{ steps.image.outputs.ref }}
           # latest (default branch only), sha-<7char>, and a YYYY.MM.DD date tag.
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}

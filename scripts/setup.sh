@@ -1,7 +1,7 @@
 #!/bin/bash
 # OPTIONAL native/contributor setup — NOT the documented user path.
 # The cross-platform equivalent (no bash/openssl/sed, works on Windows) is:
-#   docker compose run --rm backend python -m app.setup
+#   docker compose run --rm --no-deps setup
 # This bash version generates backend/.env for the native ./scripts/start.sh path.
 set -e
 

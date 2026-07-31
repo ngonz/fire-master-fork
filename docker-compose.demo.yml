@@ -22,7 +22,7 @@
 #
 # First deploy (see FIREMasterPrivate/strategy/HOSTING_DEMO.md for the full playbook):
 #   touch backend/.env      # bind-mount target must EXIST as a file, or Docker creates a dir
-#   docker compose -f docker-compose.demo.yml run --rm --no-deps backend uv run python -m app.setup
+#   docker compose -f docker-compose.demo.yml run --rm --no-deps setup
 #   docker compose -f docker-compose.demo.yml up -d --build
 #
 # Periodic reset (cron, every 2h): scripts/reset-demo.sh — down -v (fresh DB), pull, up (reseeds).
@@ -35,7 +35,7 @@ services:
     # No host port: internal network only.
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-firemaster}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-firemaster}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-CHANGEME-run-app-setup}
       POSTGRES_DB: ${POSTGRES_DB:-firemaster}
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -48,24 +48,42 @@ services:
 
   redis:
     image: redis:7-alpine
-    # No host port: internal network only.
+    # No host port: internal network only. Still password-protected — this compose file is meant
+    # to be run internet-facing behind Caddy, so nothing inside it should rely on network
+    # position alone for its security.
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-CHANGEME-run-app-setup}"]
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-CHANGEME-run-app-setup}", "--no-auth-warning", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
     restart: unless-stopped
 
+  # First-run credential generator. Run it ONCE, before anything else:
+  #     docker compose -f docker-compose.demo.yml run --rm --no-deps setup
+  # See the docker-compose.public.yml setup service for why the host directory is mounted at
+  # /hostenv rather than /app.
+  setup:
+    profiles: ["setup"]
+    image: ${FIREMASTER_BACKEND_IMAGE:-ghcr.io/gdb-mtx/firemaster-backend:latest}
+    working_dir: /app/backend
+    volumes:
+      - .:/hostenv
+    environment:
+      FIREMASTER_APP_ENV: /hostenv/backend/.env
+      FIREMASTER_ROOT_ENV: /hostenv/.env
+    command: ["uv", "run", "python", "-m", "app.setup"]
+
   # One-shot: migrate, then seed the demo persona into the empty DB, then exit.
   # After each reset's `down -v` the DB volume is fresh, so this reseeds every time.
   migrate:
-    image: ghcr.io/gdb-mtx/firemaster-backend:latest
+    image: ${FIREMASTER_BACKEND_IMAGE:-ghcr.io/gdb-mtx/firemaster-backend:latest}
     volumes:
       - ./backend/.env:/app/backend/.env   # runtime secrets; mounted file, NOT env_file (see docker-compose.public.yml header)
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-firemaster}:${POSTGRES_PASSWORD:-firemaster}@postgres:5432/${POSTGRES_DB:-firemaster}
-      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-firemaster}:${POSTGRES_PASSWORD:-firemaster}@postgres:5432/${POSTGRES_DB:-firemaster}
-      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-firemaster}:${POSTGRES_PASSWORD:-CHANGEME-run-app-setup}@postgres:5432/${POSTGRES_DB:-firemaster}
+      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-firemaster}:${POSTGRES_PASSWORD:-CHANGEME-run-app-setup}@postgres:5432/${POSTGRES_DB:-firemaster}
+      REDIS_URL: "redis://:${REDIS_PASSWORD:-CHANGEME-run-app-setup}@redis:6379/0"
       DEMO_MODE: "true"
       SEED_DEMO: "true"
     depends_on:
@@ -76,14 +94,14 @@ services:
     command: ["sh", "-c", "uv run alembic upgrade head && (uv run python ../scripts/seed_demo.py --if-empty || true) && (uv run python ../scripts/seed_demo_scenarios.py || true)"]
 
   backend:
-    image: ghcr.io/gdb-mtx/firemaster-backend:latest
+    image: ${FIREMASTER_BACKEND_IMAGE:-ghcr.io/gdb-mtx/firemaster-backend:latest}
     # No host port: only Caddy reaches backend:8000.
     volumes:
       - ./backend/.env:/app/backend/.env   # runtime secrets; mounted file, NOT env_file
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-firemaster}:${POSTGRES_PASSWORD:-firemaster}@postgres:5432/${POSTGRES_DB:-firemaster}
-      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-firemaster}:${POSTGRES_PASSWORD:-firemaster}@postgres:5432/${POSTGRES_DB:-firemaster}
-      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-firemaster}:${POSTGRES_PASSWORD:-CHANGEME-run-app-setup}@postgres:5432/${POSTGRES_DB:-firemaster}
+      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-firemaster}:${POSTGRES_PASSWORD:-CHANGEME-run-app-setup}@postgres:5432/${POSTGRES_DB:-firemaster}
+      REDIS_URL: "redis://:${REDIS_PASSWORD:-CHANGEME-run-app-setup}@redis:6379/0"
       DEMO_MODE: "true"
     depends_on:
       postgres:

@@ -6,7 +6,7 @@
 # image). The only thing on the user's machine is this file plus a backend/.env.
 #
 # First-run flow (see the install-kit guide):
-#   1. docker compose -f docker-compose.public.yml run --rm --no-deps backend uv run python -m app.setup
+#   1. docker compose -f docker-compose.public.yml run --rm --no-deps setup
 #        -> writes backend/.env (JWT secret + admin password hash). --no-deps: setup only writes the
 #           file, so don't start postgres/redis (avoids a port clash before the user even begins).
 #   2. docker compose -f docker-compose.public.yml up
@@ -34,10 +34,10 @@ services:
   postgres:
     image: postgres:16-alpine
     ports:
-      - "${POSTGRES_HOST_PORT:-5432}:5432"
+      - "${BIND_HOST:-127.0.0.1}:${POSTGRES_HOST_PORT:-5432}:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-firemaster}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-firemaster}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-CHANGEME-run-app-setup}
       POSTGRES_DB: ${POSTGRES_DB:-firemaster}
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -50,25 +50,47 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "${REDIS_HOST_PORT:-6379}:6379"
+      - "${BIND_HOST:-127.0.0.1}:${REDIS_HOST_PORT:-6379}:6379"
+    # Redis has no auth by default; Celery brokers task payloads through it. requirepass closes
+    # that off as defence-in-depth behind the loopback bind above.
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-CHANGEME-run-app-setup}"]
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-CHANGEME-run-app-setup}", "--no-auth-warning", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
+
+  # First-run credential generator. Run it ONCE, before anything else:
+  #     docker compose -f docker-compose.public.yml run --rm --no-deps setup
+  #
+  # app.setup writes TWO files: backend/.env (read by the app) and ./.env (read by Compose
+  # for ${VAR} interpolation, so postgres and redis receive real passwords instead of the
+  # CHANGEME placeholders). Both have to land on the host, so the install directory is
+  # mounted at /hostenv and the two FIREMASTER_*_ENV variables point setup at it. Mounting
+  # it at /app instead would hide the application code baked into the image.
+  setup:
+    profiles: ["setup"]
+    image: ${FIREMASTER_BACKEND_IMAGE:-ghcr.io/gdb-mtx/firemaster-backend:latest}
+    working_dir: /app/backend
+    volumes:
+      - .:/hostenv
+    environment:
+      FIREMASTER_APP_ENV: /hostenv/backend/.env
+      FIREMASTER_ROOT_ENV: /hostenv/.env
+    command: ["uv", "run", "python", "-m", "app.setup"]
 
   # One-shot: applies Alembic migrations, then (on an empty DB) seeds the demo persona, then
   # exits. The seed scripts are baked into the image at /app/scripts (the build context is the
   # repo root — see backend/Dockerfile), so `../scripts/seed_demo.py` resolves with no mount.
   # Seeing "migrate Exited (0)" in `docker compose ps` is NORMAL.
   migrate:
-    image: ghcr.io/gdb-mtx/firemaster-backend:latest
+    image: ${FIREMASTER_BACKEND_IMAGE:-ghcr.io/gdb-mtx/firemaster-backend:latest}
     volumes:
       - ./backend/.env:/app/backend/.env   # runtime secrets (see header); NOT env_file
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-firemaster}:${POSTGRES_PASSWORD:-firemaster}@postgres:5432/${POSTGRES_DB:-firemaster}
-      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-firemaster}:${POSTGRES_PASSWORD:-firemaster}@postgres:5432/${POSTGRES_DB:-firemaster}
-      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-firemaster}:${POSTGRES_PASSWORD:-CHANGEME-run-app-setup}@postgres:5432/${POSTGRES_DB:-firemaster}
+      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-firemaster}:${POSTGRES_PASSWORD:-CHANGEME-run-app-setup}@postgres:5432/${POSTGRES_DB:-firemaster}
+      REDIS_URL: "redis://:${REDIS_PASSWORD:-CHANGEME-run-app-setup}@redis:6379/0"
       DEMO_MODE: ${DEMO_MODE:-false}
       # First boot only: auto-seed the demo persona when the DB is empty. SEED_DEMO=false starts blank.
       SEED_DEMO: ${SEED_DEMO:-true}
@@ -78,17 +100,17 @@ services:
     command: ["sh", "-c", "uv run alembic upgrade head && (uv run python ../scripts/seed_demo.py --if-empty || true)"]
 
   backend:
-    image: ghcr.io/gdb-mtx/firemaster-backend:latest
+    image: ${FIREMASTER_BACKEND_IMAGE:-ghcr.io/gdb-mtx/firemaster-backend:latest}
     ports:
-      - "${BACKEND_HOST_PORT:-8000}:8000"
+      - "${BIND_HOST:-127.0.0.1}:${BACKEND_HOST_PORT:-8000}:8000"
     volumes:
       - ./backend/.env:/app/backend/.env   # runtime secrets (see header); NOT env_file
       - monarch_session:/data              # persists the Monarch session across restarts; shared with celery
     environment:
       # Inside the container Postgres/Redis are reached by SERVICE NAME, not localhost.
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-firemaster}:${POSTGRES_PASSWORD:-firemaster}@postgres:5432/${POSTGRES_DB:-firemaster}
-      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-firemaster}:${POSTGRES_PASSWORD:-firemaster}@postgres:5432/${POSTGRES_DB:-firemaster}
-      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-firemaster}:${POSTGRES_PASSWORD:-CHANGEME-run-app-setup}@postgres:5432/${POSTGRES_DB:-firemaster}
+      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-firemaster}:${POSTGRES_PASSWORD:-CHANGEME-run-app-setup}@postgres:5432/${POSTGRES_DB:-firemaster}
+      REDIS_URL: "redis://:${REDIS_PASSWORD:-CHANGEME-run-app-setup}@redis:6379/0"
       DEMO_MODE: ${DEMO_MODE:-false}
       MONARCH_SESSION_FILE: /data/.monarch_session   # on the shared volume so backend + celery all see it
     depends_on:
@@ -102,14 +124,14 @@ services:
     command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 
   celery-worker:
-    image: ghcr.io/gdb-mtx/firemaster-backend:latest
+    image: ${FIREMASTER_BACKEND_IMAGE:-ghcr.io/gdb-mtx/firemaster-backend:latest}
     volumes:
       - ./backend/.env:/app/backend/.env   # runtime secrets (see header); NOT env_file
       - monarch_session:/data              # shared Monarch session (the worker runs the sync task)
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-firemaster}:${POSTGRES_PASSWORD:-firemaster}@postgres:5432/${POSTGRES_DB:-firemaster}
-      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-firemaster}:${POSTGRES_PASSWORD:-firemaster}@postgres:5432/${POSTGRES_DB:-firemaster}
-      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-firemaster}:${POSTGRES_PASSWORD:-CHANGEME-run-app-setup}@postgres:5432/${POSTGRES_DB:-firemaster}
+      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-firemaster}:${POSTGRES_PASSWORD:-CHANGEME-run-app-setup}@postgres:5432/${POSTGRES_DB:-firemaster}
+      REDIS_URL: "redis://:${REDIS_PASSWORD:-CHANGEME-run-app-setup}@redis:6379/0"
       DEMO_MODE: ${DEMO_MODE:-false}
       MONARCH_SESSION_FILE: /data/.monarch_session
     depends_on:
@@ -123,14 +145,14 @@ services:
     command: uv run celery -A app.tasks.celery_app worker --loglevel=info -I app.tasks.sync_tasks
 
   celery-beat:
-    image: ghcr.io/gdb-mtx/firemaster-backend:latest
+    image: ${FIREMASTER_BACKEND_IMAGE:-ghcr.io/gdb-mtx/firemaster-backend:latest}
     volumes:
       - ./backend/.env:/app/backend/.env   # runtime secrets (see header); NOT env_file
       - monarch_session:/data              # shared Monarch session (beat schedules the sync task)
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-firemaster}:${POSTGRES_PASSWORD:-firemaster}@postgres:5432/${POSTGRES_DB:-firemaster}
-      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-firemaster}:${POSTGRES_PASSWORD:-firemaster}@postgres:5432/${POSTGRES_DB:-firemaster}
-      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-firemaster}:${POSTGRES_PASSWORD:-CHANGEME-run-app-setup}@postgres:5432/${POSTGRES_DB:-firemaster}
+      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-firemaster}:${POSTGRES_PASSWORD:-CHANGEME-run-app-setup}@postgres:5432/${POSTGRES_DB:-firemaster}
+      REDIS_URL: "redis://:${REDIS_PASSWORD:-CHANGEME-run-app-setup}@redis:6379/0"
       DEMO_MODE: ${DEMO_MODE:-false}
       MONARCH_SESSION_FILE: /data/.monarch_session
     depends_on:
@@ -143,9 +165,9 @@ services:
     command: uv run celery -A app.tasks.celery_app beat --loglevel=info
 
   frontend:
-    image: ghcr.io/gdb-mtx/firemaster-frontend:latest
+    image: ${FIREMASTER_FRONTEND_IMAGE:-ghcr.io/gdb-mtx/firemaster-frontend:latest}
     ports:
-      - "${FRONTEND_HOST_PORT:-5173}:5173"
+      - "${BIND_HOST:-127.0.0.1}:${FRONTEND_HOST_PORT:-5173}:5173"
     environment:
       # The Vite dev server proxies /api SERVER-SIDE (inside this container), so it must
       # reach the backend by service name, not localhost.
