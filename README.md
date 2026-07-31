@@ -61,7 +61,7 @@ itself — one reboot, then the commands below.)
 gh auth login                                         # GitHub.com → HTTPS → browser (paste the code shown in terminal)
 gh repo clone ngonz/fire-master-fork firemaster && cd firemaster
 
-docker compose run --rm --no-deps backend uv run python -m app.setup   # one-time: JWT secret, admin password, random DB/Redis passwords
+docker compose run --rm --no-deps setup   # one-time: JWT secret, admin password, random DB/Redis passwords
 docker compose up --build                             # builds + starts everything; migrations + demo data load automatically
 ```
 
@@ -162,7 +162,7 @@ on the native path).
 - **`migrate` container shows `Exited (0)`** — that's normal; it ran migrations and quit. See
   [docs/CONTAINER_RUNBOOK.md](docs/CONTAINER_RUNBOOK.md) for the full container troubleshooting table.
 - **Login fails with a startup error about `JWT_SECRET_KEY`/`AUTH_PASSWORD_HASH`** — you skipped
-  first-run setup: `docker compose run --rm --no-deps backend uv run python -m app.setup`.
+  first-run setup: `docker compose run --rm --no-deps setup`.
 - **Services start but can't reach Postgres/Redis, and the password looks like `CHANGEME-run-app-setup`**
   — you skipped first-run setup. That placeholder is the deliberate fallback so an unconfigured
   stack fails loudly instead of running on a guessable password.

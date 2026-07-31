@@ -42,7 +42,7 @@ gh auth login            # choose: GitHub.com → HTTPS → Login with a web bro
                          # ↑ It prints a one-time code IN THE TERMINAL — paste that code
                          #   into the browser prompt (it is NOT in any GitHub app).
 gh repo clone ngonz/fire-master-fork firemaster && cd firemaster
-docker compose run --rm --no-deps backend uv run python -m app.setup
+docker compose run --rm --no-deps setup
 ```
 
 `app.setup` writes **two** files, both `chmod 0600` and both gitignored:
@@ -60,18 +60,24 @@ directly, while compose reads the root file for the container-level settings.
 It runs entirely inside the container (Python + bcrypt), so there are no host dependencies and it
 works identically on Windows.
 
-> **`--no-deps` is not optional.** Without it, compose starts Postgres as a dependency of the
-> `backend` service *before* setup has generated any passwords, so the database volume gets
+> **`--no-deps` is not optional.** Without it, compose starts Postgres as a dependency
+> *before* setup has generated any passwords, so the database volume gets
 > initialised with the `CHANGEME-run-app-setup` placeholder. Postgres only reads
 > `POSTGRES_PASSWORD` when it initialises an empty data directory, so the real password written a
 > moment later would never take effect and every later connection would be rejected. If you have
 > already hit this, run `docker compose down -v` to discard the volume and start over. Setup only
 > writes files, so it needs no running services.
 
+> **Why a dedicated `setup` service?** It is the only service that bind-mounts the repository
+> root, which is what lets it write the root `.env` back to your machine. The long-running
+> services deliberately mount just `backend/`, `scripts/` and `config/`, so running setup through
+> one of them would write the root `.env` inside the container, where `--rm` then deletes it. The
+> service is behind a `setup` profile, so `docker compose up` never starts it.
+
 - **Non-interactive** (CI / scripted): set the password via an env var instead of the prompt:
-  `docker compose run --rm --no-deps -e FIREMASTER_ADMIN_PASSWORD=yourpass backend uv run python -m app.setup`
-- **Change it later**: re-run with `--force` (it refuses to overwrite otherwise):
-  `docker compose run --rm --no-deps backend uv run python -m app.setup --force`
+  `docker compose run --rm --no-deps -e FIREMASTER_ADMIN_PASSWORD=yourpass setup`
+- **Change it later**: re-run with `FIREMASTER_FORCE_SETUP=1` (it refuses to overwrite otherwise):
+  `docker compose run --rm --no-deps -e FIREMASTER_FORCE_SETUP=1 setup`
 - **Re-running never rotates the database password.** It reuses whatever is already in the root
   `.env`, because Postgres only reads `POSTGRES_PASSWORD` when initialising an empty data
   directory — generating a fresh one would leave the app unable to connect to its own database.
@@ -195,7 +201,8 @@ Start with the [README's troubleshooting table](../README.md#troubleshooting) an
 [Container Runbook](CONTAINER_RUNBOOK.md). Additional detail:
 
 - **Login fails with the correct password** — `AUTH_PASSWORD_HASH` in `backend/.env` must be a
-  bcrypt hash (starts with `$2`). Regenerate by re-running setup with `--force` (step 2). Note:
+  bcrypt hash (starts with `$2`). Regenerate by re-running setup with `FIREMASTER_FORCE_SETUP=1`
+  (step 2). Note:
   the app reads the *mounted* `backend/.env` directly — do not add `env_file:` to the backend
   service in compose (Compose interpolates env_file values and would corrupt the `$` in the
   hash). See the runbook.

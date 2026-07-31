@@ -27,7 +27,12 @@ import bcrypt
 # backend/.env — relative to this file (app/setup.py -> app -> backend), so it does
 # not matter what the current working directory is. This is the same file the app
 # reads at runtime and the same one scripts/setup.sh wrote.
-ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
+#
+# FIREMASTER_APP_ENV overrides the location. The prebuilt-image deployments
+# (docker-compose.public.yml / .demo.yml) do not have a repo checkout to mount over /app —
+# doing so would hide the application code baked into the image — so they mount the host
+# directory somewhere harmless and point these two variables at it instead.
+ENV_PATH = Path(os.environ.get("FIREMASTER_APP_ENV") or Path(__file__).resolve().parent.parent / ".env")
 
 # Repo-root .env — this is a DIFFERENT file with a different job. docker-compose.yml
 # deliberately has no top-level env_file (interpolation mangles the "$" sequences in the
@@ -35,7 +40,11 @@ ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 # pydantic. That means values written there never reach the postgres or redis containers.
 # Compose reads the repo-root .env for ${VAR} interpolation, so the database and cache
 # passwords have to live here or the services come up with the placeholder defaults.
-ROOT_ENV_PATH = Path(__file__).resolve().parent.parent.parent / ".env"
+#
+# This path MUST land on a bind mount. Written to a path that only exists inside the
+# container, setup reports success and the file vanishes with `--rm`, leaving compose to
+# fall back to the CHANGEME placeholders. Override with FIREMASTER_ROOT_ENV.
+ROOT_ENV_PATH = Path(os.environ.get("FIREMASTER_ROOT_ENV") or Path(__file__).resolve().parent.parent.parent / ".env")
 
 # Generated credentials use token_urlsafe (charset A-Za-z0-9-_) rather than a charset with
 # punctuation. Compose interpolates the root .env, so a "$" in a password would be eaten or

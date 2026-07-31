@@ -6,7 +6,7 @@
 # image). The only thing on the user's machine is this file plus a backend/.env.
 #
 # First-run flow (see the install-kit guide):
-#   1. docker compose -f docker-compose.public.yml run --rm --no-deps backend uv run python -m app.setup
+#   1. docker compose -f docker-compose.public.yml run --rm --no-deps setup
 #        -> writes backend/.env (JWT secret + admin password hash). --no-deps: setup only writes the
 #           file, so don't start postgres/redis (avoids a port clash before the user even begins).
 #   2. docker compose -f docker-compose.public.yml up
@@ -59,6 +59,25 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  # First-run credential generator. Run it ONCE, before anything else:
+  #     docker compose -f docker-compose.public.yml run --rm --no-deps setup
+  #
+  # app.setup writes TWO files: backend/.env (read by the app) and ./.env (read by Compose
+  # for ${VAR} interpolation, so postgres and redis receive real passwords instead of the
+  # CHANGEME placeholders). Both have to land on the host, so the install directory is
+  # mounted at /hostenv and the two FIREMASTER_*_ENV variables point setup at it. Mounting
+  # it at /app instead would hide the application code baked into the image.
+  setup:
+    profiles: ["setup"]
+    image: ${FIREMASTER_BACKEND_IMAGE:-ghcr.io/gdb-mtx/firemaster-backend:latest}
+    working_dir: /app/backend
+    volumes:
+      - .:/hostenv
+    environment:
+      FIREMASTER_APP_ENV: /hostenv/backend/.env
+      FIREMASTER_ROOT_ENV: /hostenv/.env
+    command: ["uv", "run", "python", "-m", "app.setup"]
 
   # One-shot: applies Alembic migrations, then (on an empty DB) seeds the demo persona, then
   # exits. The seed scripts are baked into the image at /app/scripts (the build context is the

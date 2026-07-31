@@ -48,6 +48,30 @@ services:
       timeout: 5s
       retries: 5
 
+  # First-run credential generator. Run it ONCE, before anything else:
+  #     docker compose run --rm --no-deps setup
+  #
+  # Why this needs its own service instead of `run backend ... -m app.setup`:
+  # app.setup writes TWO files — backend/.env (read by the app) and the repo-root .env
+  # (read by Compose for ${VAR} interpolation, so postgres and redis get real passwords).
+  # The backend service only bind-mounts ./backend, ./scripts and ./config, so a root .env
+  # written from there lands on the container's own filesystem and disappears with --rm.
+  # Mounting the repo root here is what makes the root .env actually reach your disk.
+  #
+  # `profiles` keeps it out of `docker compose up` — it must never run unattended, because
+  # it prompts for an admin password. `--no-deps` keeps postgres from starting and
+  # initialising its data directory with the CHANGEME placeholder password before setup has
+  # generated the real one (postgres only reads POSTGRES_PASSWORD on an EMPTY data dir, so
+  # that mistake is permanent until `docker compose down -v`).
+  setup:
+    profiles: ["setup"]
+    image: ${FIREMASTER_BACKEND_IMAGE:-firemaster-backend:local}
+    working_dir: /app/backend
+    volumes:
+      - .:/app                      # repo root, so app.setup can write BOTH .env files
+      - /app/backend/.venv          # anon volume: keep the image's Linux venv
+    command: ["uv", "run", "python", "-m", "app.setup"]
+
   # One-shot: applies Alembic migrations, then exits. backend/celery wait for it to
   # finish (service_completed_successfully) so the schema always exists before they run.
   # Seeing "migrate Exited (0)" in `docker compose ps` is NORMAL.
