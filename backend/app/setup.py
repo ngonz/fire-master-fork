@@ -143,15 +143,45 @@ def _resolve_password() -> str:
     return pw
 
 
+def _match_dir_owner(path: Path) -> None:
+    """When running as root, hand the file back to whoever owns its directory.
+
+    Only matters on Linux. The setup container runs as uid 0 and bind mounts do NOT remap
+    uids there, so a file written here lands on the host as root:root. Combined with 0600
+    that locks the host user out of their own repo: `docker compose` reads the root .env
+    itself and aborts with "open .env: permission denied" — so `up`, `ps` and even the
+    documented recovery `down -v` all fail, unrecoverable without sudo. That is the same
+    total-lockout class this project avoided by banning ${VAR:?} in compose files.
+
+    The parent directory is the checkout, already owned by the host user, so it is the
+    correct ownership target. No-op on macOS/Windows (Docker Desktop already uid-maps) and
+    no-op whenever we are not root.
+    """
+    if os.geteuid() != 0:
+        return
+    try:
+        owner = path.parent.stat()
+        if owner.st_uid != 0 or owner.st_gid != 0:
+            os.chown(path, owner.st_uid, owner.st_gid)
+    except OSError:
+        # Best-effort: a chown failure must not abort a setup run that otherwise succeeded.
+        pass
+
+
 def _write_private(path: Path, content: str) -> None:
     """Write with owner-only permissions, created restrictive from the start.
 
     os.open with mode 0o600 avoids the window where the file exists world-readable between
-    creation and a later chmod.
+    creation and a later chmod. The explicit fchmod is NOT redundant: POSIX applies the mode
+    argument only when O_CREAT actually creates the file, so an existing 0644 file (compose
+    file-bind-mount targets must pre-exist, and .env.example is documented as copyable) would
+    otherwise keep its permissions while this tool reported "chmod 0600".
     """
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        os.fchmod(fd, 0o600)
         fh.write(content)
+    _match_dir_owner(path)
 
 
 def _read_env_values(path: Path) -> dict[str, str]:
@@ -169,13 +199,21 @@ def _read_env_values(path: Path) -> dict[str, str]:
 
 
 def _resolve_infra_credentials() -> dict[str, str]:
-    """Reuse credentials already in the root .env, generate any that are missing.
+    """Reuse credentials already on disk, generate only what is genuinely absent.
 
     Reuse matters: the root .env feeds the postgres container and backend/.env feeds the
     application. If setup generated a fresh password on every run, re-running it would leave
     the app holding a password the already-initialised database no longer accepts.
+
+    backend/.env is checked as a SECOND source because of the upgrade path. An install created
+    before the root .env existed has its working POSTGRES_PASSWORD only in backend/.env. Such a
+    user pulls this branch, hits the CHANGEME placeholder, is told to re-run setup — and if we
+    looked at the root .env alone we would find nothing, mint brand-new random passwords, and
+    overwrite backend/.env: the last surviving record of the credential their pgdata volume
+    actually accepts. That is unrecoverable short of destroying the database with `down -v`.
+    Root wins on conflict, since it is what compose interpolates into postgres itself.
     """
-    existing = _read_env_values(ROOT_ENV_PATH)
+    existing = {**_read_env_values(ENV_PATH), **_read_env_values(ROOT_ENV_PATH)}
     return {
         "pguser": existing.get("POSTGRES_USER") or "firemaster",
         "pgdb": existing.get("POSTGRES_DB") or "firemaster",
@@ -201,7 +239,12 @@ def _sync_root_env(creds: dict[str, str]) -> str:
         "POSTGRES_PASSWORD": creds["pgpw"],
         "REDIS_PASSWORD": creds["redispw"],
     }
-    missing = {k: v for k, v in required.items() if k not in existing}
+    # Truthiness, not `k not in existing`, so this agrees with _resolve_infra_credentials.
+    # A key present but EMPTY (POSTGRES_PASSWORD=) is falsy there, so a fresh password is
+    # generated and written to backend/.env — but a membership test would call it "present"
+    # and never write it here, leaving the two files permanently disagreeing and postgres
+    # refusing to initialise with an empty password.
+    missing = {k: v for k, v in required.items() if not existing.get(k)}
     if not missing:
         return "already complete"
 
@@ -210,6 +253,7 @@ def _sync_root_env(creds: dict[str, str]) -> str:
         for key, value in missing.items():
             fh.write(f"{key}={value}\n")
     os.chmod(ROOT_ENV_PATH, 0o600)
+    _match_dir_owner(ROOT_ENV_PATH)
     return f"appended {', '.join(missing)}"
 
 
@@ -237,7 +281,14 @@ def main() -> None:
     pwhash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
     creds = _resolve_infra_credentials()
-    reused = ROOT_ENV_PATH.exists() and "POSTGRES_PASSWORD" in _read_env_values(ROOT_ENV_PATH)
+    # Must mirror the sources _resolve_infra_credentials reads, and must be evaluated before
+    # ENV_PATH is rewritten below. Reporting "random passwords generated" when the password was
+    # in fact reused invites a user to assume their database is now unreachable and destroy the
+    # volume with `down -v` to recover from a problem they do not have.
+    reused = bool(
+        _read_env_values(ROOT_ENV_PATH).get("POSTGRES_PASSWORD")
+        or _read_env_values(ENV_PATH).get("POSTGRES_PASSWORD")
+    )
 
     content = ENV_TEMPLATE.format(jwt=jwt_secret, username=username, pwhash=pwhash, **creds)
     # Write with restrictive permissions (owner-only) to protect secrets at rest.
@@ -251,7 +302,7 @@ def main() -> None:
     print("  JWT key:      (generated, 64 hex chars)")
     print("  Password:     (hashed with bcrypt)")
     print(
-        "  DB/Redis:     (reused from existing root .env)"
+        "  DB/Redis:     (existing passwords reused)"
         if reused
         else "  DB/Redis:     (random passwords generated)"
     )
