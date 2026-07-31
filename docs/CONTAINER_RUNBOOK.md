@@ -125,7 +125,7 @@ docker compose up --build     # rebuilds the world; data still there
   every service. It does **not** read `.env.example` (repo root isn't mounted) — the template is
   embedded in the module.
 - `main.py` startup errors now point at this command instead of a manual bcrypt one-liner.
-- **Run it once:** `docker compose run --rm backend uv run python -m app.setup`.
+- **Run it once:** `docker compose run --rm --no-deps backend uv run python -m app.setup`.
 
 ### Change 5 — Retire `start.sh` as the user path (`scripts/`, `README`)
 - `scripts/start.sh` and `scripts/setup.sh` are **kept**, but their header comments now mark them
@@ -237,12 +237,13 @@ taken — no file edits, just set the var.)
 | Frontend container starts but browser can't reach `:5173` | Vite bound to localhost inside the container | Dockerfile must run `vite --host` (binds `0.0.0.0`) |
 | Frontend loads but all API calls 500/fail | Vite proxy still points at `localhost:8000` | `VITE_API_URL=http://backend:8000` must be set on the frontend service |
 | `migrate` container shows "Exited (0)" | **Normal** — it's a one-shot that runs migrations then quits | nothing to fix |
-| Backend crashes: `JWT_SECRET_KEY must be set…` | No valid `.env` yet | run the setup command (Change 4): `docker compose run --rm backend uv run python -m app.setup` |
+| Backend crashes: `JWT_SECRET_KEY must be set…` | No valid `.env` yet | run the setup command (Change 4): `docker compose run --rm --no-deps backend uv run python -m app.setup` |
 | Login always fails with the *correct* password | **The env_file `$`-interpolation bug** (found during build): Compose interpolates `env_file` values, stripping `$…` sequences out of the bcrypt hash | the app services intentionally have **no** `env_file` — secrets load from the *mounted* `backend/.env` via pydantic. Do **not** re-add `env_file:` to backend/celery/migrate |
 | `ModuleNotFoundError` running `docker compose … backend python …` | Bare `python` uses the system interpreter, not the uv venv | prefix with `uv run`: `… backend uv run python …` |
 | Another machine on the LAN can't reach `:5173` / `:8000` | **By design** — every published port binds `${BIND_HOST:-127.0.0.1}`, so the stack is loopback-only out of the box | set `BIND_HOST=0.0.0.0` in the repo-root `.env`, and only behind a firewall or trusted network |
-| Postgres or Redis rejects the password, or a service logs `CHANGEME-run-app-setup` | Setup never ran, so the compose placeholder defaults are still in effect | run `docker compose run --rm backend uv run python -m app.setup` — it generates random credentials and writes both `.env` files |
+| Postgres or Redis rejects the password, or a service logs `CHANGEME-run-app-setup` | Setup never ran, so the compose placeholder defaults are still in effect | run `docker compose run --rm --no-deps backend uv run python -m app.setup` — it generates random credentials and writes both `.env` files |
 | Password errors persist *after* running setup | `POSTGRES_PASSWORD` only takes effect when the `pgdata` volume is first initialized; an existing volume keeps its original password | either restore the original password, or wipe the volume with `docker compose down -v` (**destroys all data**) |
+| Password errors on a **brand-new** install, right after the very first setup run | The setup command was run **without `--no-deps`**, so Compose started Postgres before setup had generated anything. Postgres initialized `pgdata` with the `CHANGEME-run-app-setup` placeholder, and setup then wrote a different random password | `docker compose down -v` (nothing to lose yet on a first install), then `docker compose up --build`. Always use `--no-deps` on the setup command |
 | Old Python package after changing deps | The anonymous `.venv` volume persists across rebuilds and can hold stale deps | rebuild, then `docker compose up --build --renew-anon-volumes` (renews the anon `.venv` only; the named data volume is kept) |
 | Port already in use on `up` | Your native stack or sister project is running | remap with `BACKEND_HOST_PORT=…` etc., or stop the native app layer |
 | Demo data vanished after connecting Monarch | **Expected** — the first real sync auto-clears the demo persona (marker-scoped: only demo rows, real data untouched) | keep it with `AUTO_CLEAR_DEMO=false`; the FIRE config stays for you to rebuild on /config |

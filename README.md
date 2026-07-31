@@ -61,9 +61,16 @@ itself — one reboot, then the commands below.)
 gh auth login                                         # GitHub.com → HTTPS → browser (paste the code shown in terminal)
 gh repo clone ngonz/fire-master-fork firemaster && cd firemaster
 
-docker compose run --rm backend uv run python -m app.setup   # one-time: JWT secret, admin password, random DB/Redis passwords
+docker compose run --rm --no-deps backend uv run python -m app.setup   # one-time: JWT secret, admin password, random DB/Redis passwords
 docker compose up --build                             # builds + starts everything; migrations + demo data load automatically
 ```
+
+> **`--no-deps` on the setup line is not optional.** Setup only writes files, so it needs no
+> services — but without `--no-deps`, Compose helpfully starts Postgres *first*, before any
+> password exists. Postgres then permanently bakes the `CHANGEME-run-app-setup` placeholder into
+> its data volume, and every later connection is rejected. If you already hit this, run
+> `docker compose down -v` once (safe on a fresh install — there is nothing to lose yet) and then
+> `docker compose up --build`.
 
 Open **http://localhost:5173** and log in as `admin` with the password you chose — the **demo
 persona is already loaded**, so every page (Dashboard, Retirement, Runway, Config) is alive on
@@ -155,7 +162,7 @@ on the native path).
 - **`migrate` container shows `Exited (0)`** — that's normal; it ran migrations and quit. See
   [docs/CONTAINER_RUNBOOK.md](docs/CONTAINER_RUNBOOK.md) for the full container troubleshooting table.
 - **Login fails with a startup error about `JWT_SECRET_KEY`/`AUTH_PASSWORD_HASH`** — you skipped
-  first-run setup: `docker compose run --rm backend uv run python -m app.setup`.
+  first-run setup: `docker compose run --rm --no-deps backend uv run python -m app.setup`.
 - **Services start but can't reach Postgres/Redis, and the password looks like `CHANGEME-run-app-setup`**
   — you skipped first-run setup. That placeholder is the deliberate fallback so an unconfigured
   stack fails loudly instead of running on a guessable password.

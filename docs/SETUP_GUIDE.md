@@ -42,7 +42,7 @@ gh auth login            # choose: GitHub.com → HTTPS → Login with a web bro
                          # ↑ It prints a one-time code IN THE TERMINAL — paste that code
                          #   into the browser prompt (it is NOT in any GitHub app).
 gh repo clone ngonz/fire-master-fork firemaster && cd firemaster
-docker compose run --rm backend uv run python -m app.setup
+docker compose run --rm --no-deps backend uv run python -m app.setup
 ```
 
 `app.setup` writes **two** files, both `chmod 0600` and both gitignored:
@@ -60,10 +60,18 @@ directly, while compose reads the root file for the container-level settings.
 It runs entirely inside the container (Python + bcrypt), so there are no host dependencies and it
 works identically on Windows.
 
+> **`--no-deps` is not optional.** Without it, compose starts Postgres as a dependency of the
+> `backend` service *before* setup has generated any passwords, so the database volume gets
+> initialised with the `CHANGEME-run-app-setup` placeholder. Postgres only reads
+> `POSTGRES_PASSWORD` when it initialises an empty data directory, so the real password written a
+> moment later would never take effect and every later connection would be rejected. If you have
+> already hit this, run `docker compose down -v` to discard the volume and start over. Setup only
+> writes files, so it needs no running services.
+
 - **Non-interactive** (CI / scripted): set the password via an env var instead of the prompt:
-  `docker compose run --rm -e FIREMASTER_ADMIN_PASSWORD=yourpass backend uv run python -m app.setup`
+  `docker compose run --rm --no-deps -e FIREMASTER_ADMIN_PASSWORD=yourpass backend uv run python -m app.setup`
 - **Change it later**: re-run with `--force` (it refuses to overwrite otherwise):
-  `docker compose run --rm backend uv run python -m app.setup --force`
+  `docker compose run --rm --no-deps backend uv run python -m app.setup --force`
 - **Re-running never rotates the database password.** It reuses whatever is already in the root
   `.env`, because Postgres only reads `POSTGRES_PASSWORD` when initialising an empty data
   directory — generating a fresh one would leave the app unable to connect to its own database.
