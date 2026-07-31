@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 
 export function useAuth() {
   const [isAuthenticated, setIsAuthenticated] = useState(
