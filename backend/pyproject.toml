@@ -21,7 +21,7 @@ dependencies = [
     # this exact version. To upgrade: change both this line and the matching `specifier` in
     # uv.lock, then re-run `uv lock` and review the diff.
     "monarchmoneycommunity==1.3.0",
-    "python-jose[cryptography]>=3.3.0,<4",
+    "pyjwt>=2.13.0,<3",
     "bcrypt>=4.0.0,<6",
     "httpx>=0.28.0,<1",
     "python-dotenv>=1.2.0,<2",
